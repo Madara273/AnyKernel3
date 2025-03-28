@@ -9,13 +9,13 @@ kernel.compiler=Debian_Clang
 kernel.made=Madara273
 message.word=
 do.devicecheck=1
-do.modules=0
+do.modules=1
 do.systemless=1
 do.cleanup=1
 do.cleanuponabort=0
 device.name1=spes
 device.name2=spesn
-supported.versions=15.0
+supported.versions=15 - 16
 supported.patchlevels=
 supported.vendorpatchlevels=
 '; } # end properties
