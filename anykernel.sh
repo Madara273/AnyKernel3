@@ -5,26 +5,16 @@
 ### AnyKernel setup
 # global properties
 properties() { '
-kernel.string=SAKURA_NH
-kernel.compiler=GCC EVA/Clang Random
-kernel.made=Madara273
-message.word=Message me at @Madara_273c --- t.me/Madara_273c
+kernel.string=# --- Special core NetHunter --- #
+kernel.compiler=GCC EVA/Neutron-Clang
 do.devicecheck=1
 do.modules=0
 do.systemless=1
 do.cleanup=1
 do.cleanuponabort=0
-device.name1=OnePlus9Pro
-device.name2=lemonadep
-device.name3=OnePlus9ProTMO
-device.name4=lemonadept
-device.name5=OnePlus9
-device.name6=lemonade
-device.name7=OnePlus9TMO
-device.name8=lemonadet
-device.name9=OnePlus9VZW
-device.name10=lemonadev
-supported.versions=15 - 16
+device.name1=MotorolaEdge30Fusion
+device.name2=tundra
+supported.versions=16
 '; } # end properties
 
 ### AnyKernel install
