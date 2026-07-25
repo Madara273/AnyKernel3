@@ -5,8 +5,8 @@
 ### AnyKernel setup
 # global properties
 properties() { '
-kernel.string=SAKURA_NH
-kernel.compiler=GCC EVA/Clang Random
+kernel.string=SAKURA_Prototype
+kernel.compiler=Neutron-Clang
 kernel.made=Madara273
 message.word=Message me at @Madara_273c --- t.me/Madara_273c
 do.devicecheck=1
