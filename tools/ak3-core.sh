@@ -221,7 +221,7 @@ repack_ramdisk() {
     magiskboot cpio ramdisk-new.cpio test;
     magisk_patched=$?;
   fi;
-  [ $((magisk_patched & 3)) -eq 1 ] && magiskboot cpio ramdisk-new.cpio "extract .backup/.magisk $SPLITIMG/.magisk";
+  [ "$magisk_patched" -eq 1 ] && magiskboot cpio ramdisk-new.cpio "extract .backup/.magisk $SPLITIMG/.magisk";
   if [ "$comp" ]; then
     magiskboot compress=$comp ramdisk-new.cpio;
     if [ $? != 0 ] && $comp --help 2>/dev/null; then
@@ -326,7 +326,7 @@ flash_boot() {
           magiskboot cpio ramdisk.cpio test;
           magisk_patched=$?;
         fi;
-        if [ $((magisk_patched & 3)) -eq 1 ]; then
+        if [ "$magisk_patched" -eq 1 ]; then
           ui_print " " "Magisk detected! Patching kernel so reflashing Magisk is not necessary...";
           comp=$(magiskboot decompress kernel 2>&1 | grep -vE 'raw|zimage' | sed -n 's;.*\[\(.*\)\];\1;p');
           (magiskboot split $kernel || magiskboot decompress $kernel kernel) 2>/dev/null;
@@ -483,7 +483,7 @@ flash_generic() {
     if [ "$path" == "/dev/block/mapper" ]; then
       avb=$(httools_static avb $1);
       [ $? == 0 ] || abort "Failed to parse fstab entry for $1. Aborting...";
-      if [ "$avb" ]; then
+      if [ "$avb" ] && [ ! "$NO_VBMETA_PARTITION_PATCH" ]; then
         flags=$(httools_static disable-flags);
         [ $? == 0 ] || abort "Failed to parse top-level vbmeta. Aborting...";
         if [ "$flags" == "enabled" ]; then
@@ -955,7 +955,189 @@ setup_ak() {
   type ${name}_attributes >/dev/null 2>&1 && ${name}_attributes;
 }
 ###
+# Kernel version extraction function from kernel files (raw or compressed)
+# Returns only X.X.X-androidYY, discards everything else
+extract_kernel_version() {
+  local target="$1"
+  local ver_str tmpfile
+
+  # Attempt 1: raw (direct strings) - single grep extracts X.X.X-androidYY directly
+  ver_str=$(strings "$target" 2>/dev/null | grep -oE 'Linux version [0-9]+\.[0-9]+\.[0-9]+-android[0-9]+' -m1 | cut -d' ' -f3)
+
+  # Attempt 2: compressed kernel → magiskboot decompress then strings
+  if [ -z "$ver_str" ]; then
+    tmpfile="${target}_ak3decomp"
+    magiskboot decompress "$target" "$tmpfile" 2>/dev/null
+    if [ -f "$tmpfile" ]; then
+      ver_str=$(strings "$tmpfile" 2>/dev/null | grep -oE 'Linux version [0-9]+\.[0-9]+\.[0-9]+-android[0-9]+' -m1 | cut -d' ' -f3)
+      rm -f "$tmpfile"
+    fi
+  fi
+
+  echo "$ver_str"
+}
+
+# Version comparison: returns 0 if a >= b, 1 if a < b
+version_ge() {
+  local new=$1 dev=$2
+  local n1 n2 n3 d1 d2 d3
+  
+  # Fast-track for exact matches (5.15.180 == 5.15.180)
+  [ "$new" = "$dev" ] && return 0
+
+  # Split into segments
+  n1=$(echo "$new" | cut -d. -f1); n2=$(echo "$new" | cut -d. -f2); n3=$(echo "$new" | cut -d. -f3)
+  d1=$(echo "$dev" | cut -d. -f1); d2=$(echo "$dev" | cut -d. -f2); d3=$(echo "$dev" | cut -d. -f3)
+
+  # Check Major & Minor equality
+  if [ "$n1" != "$d1" ] || [ "$n2" != "$d2" ]; then
+    ui_print "  -> ERROR: Base version mismatch ($n1.$n2 vs $d1.$d2)"
+    return 1
+  fi
+
+  # Check Patch version (e.g., .185 >= .180)
+  if [ "$n3" -ge "$d3" ] 2>/dev/null; then
+    return 0
+  else
+    ui_print "  -> ERROR: Downgrade detected ($n3 < $d3)"
+    return 1
+  fi
+}
+
+# Kernel Version Check Function: Image vs. Kernel in Device
+do_check_boot_version() {
+  #ui_print " " "  -> Check kernel version compatibility..."
+
+  # BYPASS: do.check_boot_version=0 in anykernel.sh skips check
+  if [ "$(file_getprop anykernel.sh do.check_boot_version)" != 1 ]; then
+    #ui_print "  -> [BYPASS] do.check_boot_version=0: version check SKIPPED."
+    #ui_print "  -> [BYPASS] Forced flash. Proceed with caution!"
+    return 1
+  fi
+
+  local new_ver dev_ver new_kver new_abranch dev_kver dev_abranch
+
+  # Version from Image file (new kernel to flash)
+  new_ver=$(extract_kernel_version "$AKHOME/Image")
+  if [ -z "$new_ver" ]; then
+    abort "  -> ERROR: Unable to read version from Image. Abort."
+  fi
+
+  # Version from device boot partition (target slot, direct read via $BLOCK)
+  dev_ver=$(extract_kernel_version "$BLOCK")
+  if [ -z "$dev_ver" ]; then
+    abort "  -> ERROR: Unable to read version from device boot partition. Abort."
+  fi
+
+  # Split X.X.X and androidYY
+  new_kver=$(echo "$new_ver" | cut -d- -f1)
+  new_abranch=$(echo "$new_ver" | cut -d- -f2)
+  dev_kver=$(echo "$dev_ver" | cut -d- -f1)
+  dev_abranch=$(echo "$dev_ver" | cut -d- -f2)
+
+  ui_print "  -> Image  : $new_ver"
+  ui_print "  -> Device : $dev_ver"
+
+  # Check 1: android branch must be exactly equal
+  if [ "$new_abranch" != "$dev_abranch" ]; then
+    abort "  -> MISMATCH Android branch: Image=$new_abranch | Device=$dev_abranch. Abort."
+  fi
+
+  # Check 2: kernel version Image must be >= Device
+  if ! version_ge "$new_kver" "$dev_kver"; then
+    abort "  -> MISMATCH Kernel version: Image=$new_kver < Device=$dev_kver. Abort."
+  fi
+
+  ui_print "  -> Kernel version: COMPATIBLE ($new_ver >= $dev_ver)"
+}
+
+KEY_RESULT=""
+TIMEOUT_LIMIT=9999
+
+TIMEOUT_LIMIT=$(file_getprop anykernel.sh keycheck.timeout)
+TIMEOUT_LIMIT=${TIMEOUT_LIMIT:-10}
+
+get_now() {
+    read -r uptime _ < /proc/uptime
+    echo "${uptime%.*}"
+}
+
+find_volume_nodes() {
+    local active_nodes=""
+    for dev in /dev/input/event*; do
+        [ -e "$dev" ] || continue
+        local caps=""
+        caps=$(timeout 0.2 $BIN/getevent -p "$dev" 2>/dev/null)
+        [ $? -eq 124 ] && continue # Skip frozen nodes entirely
+        if echo "$caps" | grep -qE "KEY_VOLUMEUP|KEY_VOLUMEDOWN|0072|0073"; then
+            active_nodes="$active_nodes $dev"
+        fi
+    done
+    echo "$active_nodes"
+}
+
+VOLUME_DEVS=$(find_volume_nodes)
+
+handle_input() {
+    ui_print "Waiting for key release... (Auto-timeout in $TIMEOUT_LIMIT seconds)"
+    KEY_RESULT="TIMEOUT"
+    
+    rm -f /tmp/ak3_hit_*
+    
+    local pids=""
+    for dev in $VOLUME_DEVS; do
+        local node_num="${dev##*event}"
+        (
+            $BIN/getevent "$dev" 2>/dev/null | while read -r r_type r_code r_val; do
+                if [ "$r_type" = "0001" ] && [ "$r_val" = "00000000" ]; then
+                    case "$r_code" in
+                        0073|73) echo "up" > "/tmp/ak3_hit_${node_num}"; break ;;
+                        0072|72) echo "down" > "/tmp/ak3_hit_${node_num}"; break ;;
+                    esac
+                fi
+            done
+        ) &
+        pids="$pids $!"
+    done
+    
+    local START_TIME=$(get_now)
+    
+    while true; do
+        local CURRENT_TIME=$(get_now)
+        local ELAPSED=$(( CURRENT_TIME - START_TIME ))
+        
+        for dev in $VOLUME_DEVS; do
+            local node_num="${dev##*event}"
+            local hit_file="/tmp/ak3_hit_${node_num}"
+            
+            if [ -f "$hit_file" ]; then
+                local click_type=$(cat "$hit_file")
+                case "$click_type" in
+                    "up")   KEY_RESULT="KEY_VOLUMEUP" ;;
+                    "down") KEY_RESULT="KEY_VOLUMEDOWN" ;;
+                esac
+                break 2
+            fi
+        done
+        
+        if [ $ELAPSED -ge $TIMEOUT_LIMIT ]; then
+            ui_print "Timeout reached!"
+            break
+        fi
+        
+        sleep 0.05
+    done
+    
+    echo "$KEY_RESULT" > /tmp/ak3_key_result
+    {
+        kill -9 $pids 2>/dev/null
+        killall -9 getevent 2>/dev/null
+        rm -f /tmp/ak3_hit_*
+    } >/dev/null 2>&1
+}
 
 ### end methods
 
 setup_ak;
+
+do_check_boot_version;

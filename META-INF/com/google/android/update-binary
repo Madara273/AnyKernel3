@@ -25,7 +25,7 @@ ui_print() {
   done;
 }
 
-ui_print "#==============KERNEL_BY_MADARA273===============#";
+ui_print "#===========KERNEL_BY_MADARA273============#";
 
 ui_printfile() {
   local line losrpad;
@@ -558,7 +558,7 @@ ui_print "-- Kernel Name    : $KERNEL_STRING";
 ui_print "-- Compiler       : $KERNEL_COMPILER";
 ui_print "-- Device         : $DEVICE_NAME";
 ui_print "-- Maintainer     : $KERNEL_MADE";
-ui_print "_________________________________________________" " ";
+ui_print "____________________________________________" " ";
 if [ -f version ]; then
   ui_print " ";
   ui_printfile version;
@@ -596,9 +596,9 @@ if [ "$(file_getprop anykernel.sh do.cleanup)" == 1 ]; then
 fi;
 
 ui_print "- Done"
-ui_print " " "_________________________________________________"
+ui_print " " "____________________________________________"
 ui_print " " "$MESSAGE_WORD"
-ui_print " " "_________________________________________________"
+ui_print " " "____________________________________________"
 ui_print " "
 ui_print " " " "
 
