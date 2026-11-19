@@ -502,7 +502,12 @@ flash_generic() {
         fi
       fi
       imgsz=$(wc -c < $img);
-      if [ "$imgsz" != "$(wc -c < $imgblock)" ]; then
+      local imgblocksz;
+      imgblocksz=$(blockdev --getsize64 "$imgblock") || abort "Cannot read $1 partition size";
+      [ "$imgblocksz" -gt 0 ] || abort "Invalid $1 partition size";
+      [ "$imgsz" -le "$imgblocksz" ] || abort "New $1 image exceeds partition capacity";
+      if [ "$imgsz" != "$imgblocksz" ] || [ "$(blockdev --getro "$imgblock")" != 0 ]; then
+        imgsz=$imgblocksz;
         if [ -d /postinstall/tmp -a "$SLOT_SELECT" == "inactive" ]; then
           echo "Resizing $1$SLOT snapshot..." >&2;
           snapshotupdater_static update $1 $imgsz || abort "Resizing $1$SLOT snapshot failed. Aborting...";

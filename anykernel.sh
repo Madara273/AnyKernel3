@@ -32,3 +32,8 @@ split_boot
 
 # Repack boot if ramdisk exists, otherwise flash kernel directly
 [ -f "$SPLITIMG/ramdisk.cpio" ] && { unpack_ramdisk; write_boot; } || flash_boot
+
+# Nezuko module images
+flash_generic vendor_boot;
+flash_generic vendor_dlkm;
+flash_generic system_dlkm;
